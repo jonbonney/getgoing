@@ -23,10 +23,10 @@ var initCmd = &cobra.Command{
         }
         defer os.RemoveAll(tempDir) // Clean up after we're done
 
-        // List available templates
-        templates, err := template.ListTemplates(tempDir)
+        // Load available templates
+        templates, err := template.LoadTemplates(tempDir)
         if err != nil {
-            fmt.Printf("Error listing templates: %v\n", err)
+            fmt.Printf("Error loading templates: %v\n", err)
             os.Exit(1)
         }
 
@@ -46,7 +46,7 @@ var initCmd = &cobra.Command{
 
         // Generate the project
         targetDir := filepath.Join(".", projectName)
-        err = template.GenerateProject(selectedTemplate, tempDir, targetDir, projectName, moduleName)
+        err = template.GenerateProject(selectedTemplate.DirPath, targetDir, projectName, moduleName)
         if err != nil {
             fmt.Printf("Error generating project: %v\n", err)
             os.Exit(1)
@@ -55,6 +55,7 @@ var initCmd = &cobra.Command{
         fmt.Printf("Project %s initialized successfully!\n", projectName)
     },
 }
+
 
 func init() {
     rootCmd.AddCommand(initCmd)

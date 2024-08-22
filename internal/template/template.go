@@ -6,9 +6,73 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+    "sort"
 
 	"github.com/manifoldco/promptui"
+    "gopkg.in/yaml.v3"
 )
+
+type Variable struct {
+	Name        string `yaml:"name"`
+	Description string `yaml:"description"`
+}
+
+type Template struct {
+	Name        string     `yaml:"name"`
+	Description string     `yaml:"description"`
+	Variables   []Variable `yaml:"variables"`
+	Files       []string   `yaml:"files"`
+	DirPath     string     // To store the directory where the template.yaml was found
+}
+
+
+// LoadTemplates scans the given directory for template.yaml files, parses them,
+// and returns an array of Template objects.
+func LoadTemplates(dir string) ([]Template, error) {
+	var templates []Template
+
+	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		// Check if the file is a template.yaml
+		if info.IsDir() || info.Name() != "template.yaml" {
+			return nil
+		}
+
+		// Parse the template.yaml file
+		file, err := os.Open(path)
+		if err != nil {
+			return fmt.Errorf("could not open file %s: %w", path, err)
+		}
+		defer file.Close()
+
+		var tmpl Template
+		decoder := yaml.NewDecoder(file)
+		if err := decoder.Decode(&tmpl); err != nil {
+			return fmt.Errorf("could not parse file %s: %w", path, err)
+		}
+
+		// Store the directory where the template.yaml was found
+		tmpl.DirPath = filepath.Dir(path)
+
+		templates = append(templates, tmpl)
+
+		return nil
+	})
+
+	if err != nil {
+		return nil, fmt.Errorf("could not load templates: %w", err)
+	}
+
+	// Sort templates by name
+	sort.Slice(templates, func(i, j int) bool {
+		return templates[i].Name < templates[j].Name
+	})
+
+	return templates, nil
+}
 
 // CloneRepository clones the remote template repository to a temporary directory
 func CloneRepository(repoURL string) (string, error) {
@@ -43,19 +107,35 @@ func ListTemplates(repoDir string) ([]string, error) {
 }
 
 // SelectTemplate prompts the user to select a template
-func SelectTemplate(templates []string) (string, error) {
+func SelectTemplate(templates []Template) (Template, error) {
     prompt := promptui.Select{
         Label: "Select a Template",
         Items: templates,
+        Templates: &promptui.SelectTemplates{
+            Label:    "{{ . }}",
+            Active:   "> {{ .Name | cyan }}",
+            Inactive: "  {{ .Name }}",
+            Details: `
+----------- Template Details -----------
+{{ "Name:" | faint }}        {{ .Name }}
+{{ "Description:" | faint }} {{ .Description }}
+{{ "Variables:" | faint }}   
+{{- range .Variables }}
+  - {{ .Name }}: {{ .Description }}
+{{- end }}`,
+        },
+        Size: 10,
     }
 
-    _, result, err := prompt.Run()
+
+    i, _, err := prompt.Run()
     if err != nil {
-        return "", fmt.Errorf("could not select template: %w", err)
+        return Template{}, fmt.Errorf("could not select template: %w", err)
     }
 
-    return result, nil
+    return templates[i], nil
 }
+
 
 // GetProjectDetails prompts the user for project details
 func GetProjectDetails() (string, string, error) {
@@ -80,9 +160,7 @@ func GetProjectDetails() (string, string, error) {
 }
 
 // GenerateProject generates the project in the target directory
-func GenerateProject(templateName, repoDir, targetDir, projectName, moduleName string) error {
-    templateDir := filepath.Join(repoDir, templateName)
-
+func GenerateProject(templateDir, targetDir, projectName, moduleName string) error {
     err := filepath.Walk(templateDir, func(path string, info os.FileInfo, err error) error {
         if err != nil {
             return err
